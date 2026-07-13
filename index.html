@@ -582,15 +582,30 @@
     localStorage.setItem('nexus_notify', notifToggle.checked ? '1' : '0');
   });
 
-  // ---------- Usage tracking (from Groq rate-limit headers) ----------
+  // ---------- Usage tracking ----------
+  function bumpRequestCounter(){
+    const today = new Date().toISOString().slice(0,10);
+    const storedDay = localStorage.getItem('nexus_count_day');
+    let count = parseInt(localStorage.getItem('nexus_count_today') || '0', 10);
+    if(storedDay !== today){ count = 0; localStorage.setItem('nexus_count_day', today); }
+    count += 1;
+    localStorage.setItem('nexus_count_today', String(count));
+    return count;
+  }
   function loadUsage(){
+    const today = new Date().toISOString().slice(0,10);
+    const storedDay = localStorage.getItem('nexus_count_day');
+    const count = (storedDay === today) ? (localStorage.getItem('nexus_count_today') || '0') : '0';
     const remaining = localStorage.getItem('nexus_usage_remaining');
     const limit = localStorage.getItem('nexus_usage_limit');
     const resetAt = localStorage.getItem('nexus_reset_at');
     if(remaining && limit){
-      usageRequests.textContent = remaining + ' / ' + limit;
+      usageRequests.textContent = remaining + ' / ' + limit + ' (da Groq)';
       const pct = 100 - Math.round((remaining/limit)*100);
       usageBarFill.style.width = pct + '%';
+    } else {
+      usageRequests.textContent = count + ' messaggi inviati oggi';
+      usageBarFill.style.width = '0%';
     }
     updateResetDisplay(resetAt);
   }
@@ -722,6 +737,7 @@
         headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + key },
         body: JSON.stringify({ model: modelToUse, messages, temperature:0.7 })
       });
+      bumpRequestCounter();
       captureRateLimitHeaders(response);
       const data = await response.json();
       hideTyping();
@@ -781,23 +797,36 @@
   // ---------- Voice ----------
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recognizer = null, voiceActive = false, italianMaleVoice = null;
+  const KNOWN_MALE_IT_NAMES = /luca|diego|federico|marco|male/i;
 
   function pickVoice(){
+    if(!window.speechSynthesis) return;
     const voices = window.speechSynthesis.getVoices();
-    italianMaleVoice = voices.find(v => v.lang && v.lang.startsWith('it') && /luca|diego|male/i.test(v.name))
+    if(!voices || voices.length === 0) return;
+    italianMaleVoice = voices.find(v => v.lang && v.lang.startsWith('it') && KNOWN_MALE_IT_NAMES.test(v.name))
                      || voices.find(v => v.lang && v.lang.startsWith('it'))
                      || null;
   }
-  if(window.speechSynthesis){ window.speechSynthesis.onvoiceschanged = pickVoice; pickVoice(); }
+  if(window.speechSynthesis){
+    window.speechSynthesis.onvoiceschanged = pickVoice;
+    pickVoice();
+    // Safari a volte non emette voiceschanged: ritentiamo per qualche secondo.
+    let voiceRetries = 0;
+    const voiceRetryTimer = setInterval(() => {
+      if(italianMaleVoice || voiceRetries > 8){ clearInterval(voiceRetryTimer); return; }
+      pickVoice(); voiceRetries++;
+    }, 400);
+  }
 
   function speak(text){
     return new Promise((resolve) => {
       if(!window.speechSynthesis){ resolve(); return; }
+      if(!italianMaleVoice) pickVoice(); // ultimo tentativo appena prima di parlare
       window.speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'it-IT';
       if(italianMaleVoice) utter.voice = italianMaleVoice;
-      utter.pitch = 0.9;
+      utter.pitch = 0.85;
       orb.className = 'orb speaking';
       voiceState.textContent = 'Nexsus sta parlando...';
       utter.onend = () => resolve();
