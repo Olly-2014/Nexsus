@@ -848,6 +848,13 @@
 
   voiceBtn.addEventListener('click', () => {
     if(!SpeechRecognition){ renderError('Il riconoscimento vocale non è supportato su questo browser.'); return; }
+    // iOS Safari richiede che speechSynthesis parta nello stesso gesto dell'utente:
+    // "sblocchiamo" la voce qui, in modo sincrono, prima di iniziare il loop asincrono.
+    if(window.speechSynthesis){
+      const unlock = new SpeechSynthesisUtterance(' ');
+      unlock.volume = 0;
+      window.speechSynthesis.speak(unlock);
+    }
     voiceOverlay.classList.add('open'); voiceActive = true; voiceLoop();
   });
   endCallBtn.addEventListener('click', () => {
